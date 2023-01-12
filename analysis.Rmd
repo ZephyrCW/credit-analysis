@@ -1,0 +1,149 @@
+---
+title: "Credit Card Fraud Analysis"
+author: "Yu Wu (yuw5@illinois.edu)"
+date: "11/19/2020"
+output:
+  html_document: 
+    theme: default
+    toc: yes
+---
+
+```{r, setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = 'center')
+```
+
+```{r, load-packages, include = FALSE}
+# load packages
+library("caret")
+```
+
+```{r make-data, warning = FALSE, message = FALSE}
+# read data and subset
+source("make-data.R")
+```
+
+```{r read-full-data, warning = FALSE, message = FALSE}
+# read full data
+cc = data.table::fread("data/cc.csv.gz")
+```
+
+```{r read-subset-data, warning = FALSE, message = FALSE}
+# read subset of data
+cc_sub = data.table::fread("data/cc-sub.csv")
+```
+
+***
+
+## Abstract
+
+This analysis is about building a model to detect credit card frauds. The reason of doing this analysis is that currently most people use credit card in their daily life, and there are thus an increasingly amount of credit card frauds happening. There isn't any easy way to prevent frauds, but we can detect them and response to them as quickly as possible to lower the loss to a minimum amount. The methods I used to build models are cross validation, KNN classification and Decision Tree classification. In the end, I found a Decision Tree model that have $87.7551%$ accuracy. This value is not very high, but it useful enough to help banks take actions and help card owners to secure their money. 
+
+
+
+***
+
+## Introduction
+
+In this analysis, we are going to build a model for detecting credit card frauds using the Credit Card Fraud Detection data set given in [Kaggle](https://www.kaggle.com/mlg-ulb/creditcardfraud). The purpose of building this model is to help banks detect the credit card fraud before being reported. With the models we built, a bank can look at the features of a credit card transaction and decide whether it is a fraud, and if so, the bank can freeze the account to protect user's money. 
+
+***
+
+## Methods
+
+The first step is read in the data and make it manageable. The original data set comes from Kaggle and it has already been cleaned, thus we do not need to deal with `NA`s. However, the data set was too big and it is hard for our PC to process. Thus we use the code in `make-data.R` to create a subset of the original data set. Thus it is easier to process and analyze.  
+
+The next step to create a model is splitting the data. Normally, we should firstly test-train split then estimate-validate split the data. However, I would use the `train` function from `caret` package this time, and the function will do the cross validation for us and thus there is no need to to estimate-validate split the data manually. 
+
+Since there is no `NA`s in the data set, our data is all set to do the further modeling work.
+
+```{r, echo=TRUE}
+# test train split the data
+set.seed(42)
+trn_idx = createDataPartition(cc_sub$Class, p = 0.80, list = TRUE)
+cc_trn = cc_sub[trn_idx$Resample1, ]
+cc_tst = cc_sub[-trn_idx$Resample1, ]
+
+```
+
+
+### Data
+
+The data we currently have is the train data and test data. There are 31 variables in the data set, 30 being the feature variables and one being the response variable. The response variable is `Class`, which takes value 1 in case of fraud and 0 in case of genuine, however the `make-data.R` script have changed it to factor. The variables `V1` to `V28` are the principal components to the prediction, however due to confidentiality issues, there is no further explanations to those variables. There is also a variable of the seconds elapsed between each transaction and the first transaction, and a variable of transaction amount. 
+
+When I looked into the training data set, I found the data is heavily imbalanced. There are much more "genuine" cases than "fraud" cases, and this will resulting in a huge difficulty to predict the fraud cases. Simply guessing every cases are "genuine" can give a extremely high accuracy. Thus I modified the `make-data.R` script, dropped the most of the "genuine" cases from the full data and keep the same amount of "genuine" cases as the "fraud" cases. Then, I have to redo the splitting process. 
+
+### Modeling
+
+In the modeling part, we are using KNN and tree models to do the classification. To find the best tuning parameters, we are doing a 5-fold cross validation. The whole detailed process of cross validation and fitting models and comparing the metrics are dealt by the `train` function from `caret` package.
+
+```{r}
+set.seed(42)
+
+cv_5 = trainControl(method = "cv", number = 5)
+
+cc_tree_mod = train(
+  form = Class ~ .,
+  data = cc_trn,
+  method = "rpart",
+  trControl = cv_5,
+  tuneLength = 10
+)
+
+
+cc_knn_mod = train(
+  form = Class ~ .,
+  data = cc_trn,
+  method = "knn",
+  trControl = cv_5,
+  tuneLength = 10
+)
+
+
+```
+
+The Decision Tree Model that produces best accuracy is the model with `cp = 0` tunning parameter, and the KNN model that produces the best accuracy is the mode with `k = 19` tunning parameter.
+
+***
+
+## Results
+
+From the output in the modeling section above, we have found the best KNN model and the best Decision Tree model by cross validation and looking at the validation accuracy. Now we should fit the models to the training data and test them with the testing data and find the best model we have. We can use the report of `skim` function to check if the testing data is in the same structure as the training data. 
+
+Since we are using `train` function, we can directly predict on the previous models from the result of `train` function, and it will automatically fit the best model to the train data. 
+
+```{r}
+# function to calculate the test accuracy of fraud
+calc_acc = function(mod){
+  predicted = predict(mod, newdata = cc_tst, type = "raw")
+  actual = cc_tst$Class
+  mean(predicted == actual)
+}
+```
+
+```{r, echo = TRUE}
+calc_acc(cc_tree_mod)
+calc_acc(cc_knn_mod)
+```
+From the result above, we can see that the testing accuracy of Decision Tree is greater than that of KNN model. Thus Decision Tree model with tunning parameter `cp = 0` is our best model.
+
+***
+
+## Discussion
+
+The final model we come up with is a decision tree model with `cp = 0` as tunning parameter, and the test accuracy is $87.7551%$. This accuracy means that when a credit card transaction happened, with the 30 features and our model, the bank can have a $87.7551%$ confident result detecting the fraud. The value $87.7551%$ is high enough for a bank to take actions on this credit card transaction. Bank could decide to freeze the card or to send a verification message to the card owner. 
+
+
+***
+
+## Appendix
+
+```{r, echo=TRUE}
+
+skimr::skim(cc_sub)
+skimr::skim(cc_trn)
+skimr::skim(cc_tst)
+
+cc_tree_mod
+cc_knn_mod
+```
+
